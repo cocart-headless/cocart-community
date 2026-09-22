@@ -74,7 +74,7 @@ if ( ! class_exists( 'CoCart_Authentication' ) ) {
 		 *
 		 * @access protected
 		 *
-		 * @since 4.9.8 Introduced.
+		 * @since 4.9.7 Introduced.
 		 *
 		 * @var bool
 		 */
@@ -366,16 +366,14 @@ if ( ! class_exists( 'CoCart_Authentication' ) ) {
 		 * @access public
 		 *
 		 * @since 3.0.0 Introduced.
-		 * @since 4.9.7 Scoped to CoCart's own REST requests so foreign routes no longer
-		 *              short-circuit WordPress core's REST cookie nonce check.
-		 * @since 4.9.8 Reworked the 4.9.7 scoping: it keyed on
-		 *              `CoCart::is_rest_api_request()`, which inspects the request URL —
-		 *              attacker-controlled data, satisfiable on any route by appending a
-		 *              query value that merely contains CoCart's route pattern, and also
-		 *              true for every request through the core batch endpoint regardless
-		 *              of what it contains. Keys on `$authenticated_by_cocart` instead,
-		 *              which only becomes true when CoCart's own `authenticate()` actually
-		 *              established the user for this specific request.
+		 * @since 4.9.7 Scoped to requests CoCart itself has authenticated, tracked by
+		 *              `$authenticated_by_cocart` (set by `authenticate()` only when it
+		 *              establishes a user via Basic Auth or a third-party
+		 *              `cocart_authenticate` hook, e.g. JWT). The request URL must never
+		 *              be used to decide this — it is attacker-controlled, so a
+		 *              route-pattern check can be satisfied by appending a query value
+		 *              that merely contains the pattern, or by routing through the core
+		 *              batch endpoint.
 		 *
 		 * @param WP_Error|mixed $error Error from another authentication handler, null if we should handle it, or another value if not.
 		 *

@@ -14,26 +14,16 @@
  * administrator's session cookie alone create a new administrator account
  * via `/wp/v2/users`, with no nonce, deliverable as a plain link.
  *
- * The first fix (4.9.7) scoped the callback with
- * `CoCart::is_rest_api_request()`, which decides by inspecting
- * `$_SERVER['REQUEST_URI']` / `$_GET['rest_route']` for CoCart's route
- * pattern. Naoki reported that scoping was still bypassable two ways, since
- * both signals are attacker-controlled:
- *
- * - Appending an unrelated query value that merely *contains* the pattern
- *   (e.g. `?x=/wp-json/cocart/v2/cart`) to any other route satisfies the
- *   substring match without the request having anything to do with CoCart.
- * - The core batch endpoint (`/wp-json/batch/v1`) is deliberately matched
- *   by `is_rest_api_request()` so CoCart's session context applies to
- *   batched sub-requests — which also means any batch request bypasses the
- *   nonce check, regardless of what routes it actually batches together.
- *
- * The corrected fix (4.9.8) stops asking "does the URL look like a CoCart
- * request" and asks "did CoCart itself authenticate this request" instead —
- * tracked by `$authenticated_by_cocart`, set only when `authenticate()`
- * establishes a real user via Basic Auth or a third-party
- * `cocart_authenticate` hook (e.g. JWT). Neither of Naoki's bypasses ever
- * provides CoCart credentials, so neither can set that flag.
+ * check_authentication_error() only answers "no error" for a request
+ * CoCart::authenticate() itself has authenticated — tracked by
+ * `$authenticated_by_cocart`, set only when a real user is established via
+ * Basic Auth or a third-party `cocart_authenticate` hook (e.g. JWT). The
+ * request URL is never consulted, since it is attacker-controlled: a
+ * route-pattern check could otherwise be satisfied by appending an
+ * unrelated query value that merely contains the pattern (e.g.
+ * `?x=/wp-json/cocart/v2/cart`), or by routing through the core batch
+ * endpoint (`/wp-json/batch/v1`), which CoCart deliberately recognizes for
+ * session-sharing purposes regardless of what it batches together.
  *
  * @package CoCart\Tests\Unit
  */
@@ -42,7 +32,6 @@
  * Test CoCart Authentication REST Cookie Nonce Scoping Class.
  *
  * @since 4.9.7 Introduced.
- * @since 4.9.8 Rewritten around the corrected, authentication-based scoping.
  * @package CoCart\Tests\Unit
  */
 class Test_CoCart_Authentication_Nonce_Scope extends CoCart_REST_Test_Case {
@@ -228,10 +217,10 @@ class Test_CoCart_Authentication_Nonce_Scope extends CoCart_REST_Test_Case {
 	}
 
 	// -------------------------------------------------------------------------
-	// Original two exploit lanes (direct request, and a plain-link method
-	// override) — still valid under the corrected fix, since neither ever
-	// supplies CoCart credentials, so $authenticated_by_cocart stays false
-	// regardless of which scoping mechanism decides the outcome.
+	// The two exploit lanes: a direct request, and a plain link using a
+	// method override. Neither ever supplies CoCart credentials, so
+	// $authenticated_by_cocart stays false and the request is treated as
+	// anonymous.
 	// -------------------------------------------------------------------------
 
 	/**
@@ -329,8 +318,7 @@ class Test_CoCart_Authentication_Nonce_Scope extends CoCart_REST_Test_Case {
 	}
 
 	// -------------------------------------------------------------------------
-	// The two new bypasses Naoki reported against the 4.9.7 scoping — both
-	// exploit CoCart::is_rest_api_request() reading attacker-controlled data.
+// Regression tests for the two bypass techniques Naoki reported — both	// exploit reading attacker-controlled request data to fake CoCart route recognition.
 	// -------------------------------------------------------------------------
 
 	/**
@@ -373,10 +361,9 @@ class Test_CoCart_Authentication_Nonce_Scope extends CoCart_REST_Test_Case {
 	/**
 	 * The core batch endpoint is deliberately matched by
 	 * `CoCart::is_rest_api_request()` so CoCart's session context applies to
-	 * batched sub-requests. Under the 4.9.7 scoping that also meant any
-	 * `/wp-json/batch/v1` request bypassed the nonce check regardless of
-	 * what it batched together. The corrected fix doesn't consult the route
-	 * at all, so this holds independently of the batch endpoint's own
+	 * batched sub-requests. A batch request must not be treated as
+	 * CoCart-authenticated merely because of that, regardless of what it
+	 * batches together, and independently of the batch endpoint's own
 	 * per-route `allow_batch` gating.
 	 *
 	 * @return void
@@ -405,9 +392,8 @@ class Test_CoCart_Authentication_Nonce_Scope extends CoCart_REST_Test_Case {
 	/**
 	 * CoCart does not support cookie/nonce authentication for its API — only
 	 * JWT and Basic Auth. A request that merely targets a CoCart route, with
-	 * no CoCart credentials of its own, must now be treated exactly like any
-	 * other unauthenticated REST route. This is a deliberate behaviour
-	 * change from the 4.9.7 scoping, which still trusted route shape alone.
+	 * no CoCart credentials of its own, must be treated exactly like any
+	 * other unauthenticated REST route.
 	 *
 	 * @return void
 	 */
@@ -456,11 +442,11 @@ class Test_CoCart_Authentication_Nonce_Scope extends CoCart_REST_Test_Case {
 
 	// -------------------------------------------------------------------------
 	// rest_url_prefix customization — the historical context this bug was
-	// introduced alongside. The corrected fix never reads the prefix in
-	// check_authentication_error(), so foreign-route protection is trivially
-	// prefix-independent; authenticate() itself still reads it (to decide
-	// whether to attempt authentication at all), so that path is verified
-	// directly with a real Basic Auth request.
+	// introduced alongside. check_authentication_error() never reads the
+	// prefix, so foreign-route protection is trivially prefix-independent;
+	// authenticate() itself still reads it (to decide whether to attempt
+	// authentication at all), so that path is verified directly with a
+	// real Basic Auth request.
 	// -------------------------------------------------------------------------
 
 	/**
