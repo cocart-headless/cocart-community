@@ -5,7 +5,7 @@
  * @author  Sébastien Dumont
  * @package CoCart\Classes
  * @since   2.6.0 Introduced.
- * @version 4.9.0
+ * @version 4.9.7
  */
 
 // Exit if accessed directly.
@@ -343,6 +343,8 @@ if ( ! class_exists( 'CoCart_Authentication' ) ) {
 		 * @access public
 		 *
 		 * @since 3.0.0 Introduced.
+		 * @since 4.9.7 Scoped to CoCart's own REST requests so foreign routes no longer
+		 *              short-circuit WordPress core's REST cookie nonce check.
 		 *
 		 * @param WP_Error|mixed $error Error from another authentication handler, null if we should handle it, or another value if not.
 		 *
@@ -351,6 +353,15 @@ if ( ! class_exists( 'CoCart_Authentication' ) ) {
 		public function check_authentication_error( $error ) {
 			// Pass through errors from other authentication methods used before this one.
 			if ( ! empty( $error ) ) {
+				return $error;
+			}
+
+			// Only answer for requests to our own endpoints. Returning anything
+			// other than the untouched $error here for foreign routes would
+			// short-circuit WordPress core's own `rest_cookie_check_errors()`
+			// nonce check (it runs at a later priority on the same filter),
+			// disabling REST CSRF protection for every other route on the site.
+			if ( ! CoCart::is_rest_api_request() ) {
 				return $error;
 			}
 
