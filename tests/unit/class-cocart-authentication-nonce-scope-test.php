@@ -24,7 +24,7 @@
  * @since 4.9.7 Introduced.
  * @package CoCart\Tests\Unit
  */
-class Test_CoCart_Authentication_Nonce_Scope extends CoCart_Unit_Test_Case {
+class Test_CoCart_Authentication_Nonce_Scope extends CoCart_REST_Test_Case {
 
 	/**
 	 * Original superglobal/global state, restored in tearDown().
@@ -42,11 +42,11 @@ class Test_CoCart_Authentication_Nonce_Scope extends CoCart_Unit_Test_Case {
 		parent::setUp();
 
 		$this->original_state = array(
-			'REQUEST_URI'      => $_SERVER['REQUEST_URI'] ?? null,
-			'REQUEST_METHOD'   => $_SERVER['REQUEST_METHOD'] ?? null,
-			'HTTP_X_WP_NONCE'  => $_SERVER['HTTP_X_WP_NONCE'] ?? null,
-			'GET'              => $_GET,
-			'REQUEST'          => $_REQUEST,
+			'REQUEST_URI'         => $_SERVER['REQUEST_URI'] ?? null,
+			'REQUEST_METHOD'      => $_SERVER['REQUEST_METHOD'] ?? null,
+			'HTTP_X_WP_NONCE'     => $_SERVER['HTTP_X_WP_NONCE'] ?? null,
+			'GET'                 => $_GET,
+			'REQUEST'             => $_REQUEST,
 			'wp_rest_auth_cookie' => $GLOBALS['wp_rest_auth_cookie'] ?? null,
 		);
 	}
@@ -74,6 +74,8 @@ class Test_CoCart_Authentication_Nonce_Scope extends CoCart_Unit_Test_Case {
 			$GLOBALS['wp_rest_auth_cookie'] = $this->original_state['wp_rest_auth_cookie'];
 		}
 
+		remove_filter( 'rest_url_prefix', array( $this, 'custom_rest_url_prefix' ) );
+
 		wp_set_current_user( 0 );
 
 		parent::tearDown();
@@ -99,6 +101,36 @@ class Test_CoCart_Authentication_Nonce_Scope extends CoCart_Unit_Test_Case {
 		unset( $_SERVER['HTTP_X_WP_NONCE'], $_REQUEST['_wpnonce'], $_GET['_wpnonce'] );
 
 		return $admin_id;
+	}
+
+	/**
+	 * Replicates the auth-then-dispatch sequence from
+	 * WP_REST_Server::serve_request() (see class-wp-rest-server.php) without
+	 * its header-sending/output side effects, so a test can assert on the
+	 * resulting WP_REST_Response exactly as a real HTTP client would receive
+	 * it — status code included.
+	 *
+	 * @param WP_REST_Request $request Request to authenticate and dispatch.
+	 *
+	 * @return WP_REST_Response
+	 */
+	private function dispatch_with_full_authentication( WP_REST_Request $request ) {
+		$auth_result = apply_filters( 'rest_authentication_errors', null );
+
+		if ( is_wp_error( $auth_result ) ) {
+			return rest_ensure_response( $auth_result );
+		}
+
+		return rest_ensure_response( $this->server->dispatch( $request ) );
+	}
+
+	/**
+	 * rest_url_prefix filter callback used by the custom-prefix tests below.
+	 *
+	 * @return string
+	 */
+	public function custom_rest_url_prefix() {
+		return 'api';
 	}
 
 	/**
@@ -185,6 +217,131 @@ class Test_CoCart_Authentication_Nonce_Scope extends CoCart_Unit_Test_Case {
 			$admin_id,
 			get_current_user_id(),
 			'CoCart routes must not be forced to deauthenticate the current user the way foreign routes now correctly are.'
+		);
+	}
+
+	/**
+	 * End-to-end lane 1 — the actual exploit request, routed all the way
+	 * through to core's users endpoint, must be rejected and must not
+	 * create an account.
+	 *
+	 * This goes one layer further than the auth-layer tests above: it
+	 * proves not just that the current user is reset to anonymous, but that
+	 * the concrete `/wp/v2/users` endpoint then refuses the request and no
+	 * user is ever written to the database.
+	 *
+	 * @return void
+	 */
+	public function test_direct_post_to_users_endpoint_does_not_create_admin_without_nonce() {
+		$this->simulate_cookie_authenticated_admin_with_no_nonce();
+
+		$_SERVER['REQUEST_URI']    = '/wp-json/wp/v2/users';
+		$_SERVER['REQUEST_METHOD'] = 'POST';
+
+		$request = new WP_REST_Request( 'POST', '/wp/v2/users' );
+		$request->set_param( 'username', 'nonce_bypass_e2e_1' );
+		$request->set_param( 'email', 'nonce-bypass-e2e-1@example.invalid' );
+		$request->set_param( 'password', 'Sup3r-Secret-Password!1' );
+		$request->set_param( 'roles', array( 'administrator' ) );
+
+		$response = $this->dispatch_with_full_authentication( $request );
+
+		$this->assertSame(
+			401,
+			$response->get_status(),
+			'A direct request carrying only a session cookie and no nonce must be rejected by the users endpoint, not used to create an account.'
+		);
+		$this->assertFalse( username_exists( 'nonce_bypass_e2e_1' ), 'No account should have been created.' );
+	}
+
+	/**
+	 * End-to-end lane 2 — the plain-link/method-override exploit, routed all
+	 * the way through to core's users endpoint, must also be rejected and
+	 * must not create an account.
+	 *
+	 * @return void
+	 */
+	public function test_get_link_with_method_override_does_not_create_admin_without_nonce() {
+		$this->simulate_cookie_authenticated_admin_with_no_nonce();
+
+		// Raw request line an attacker's link would produce — read directly
+		// by CoCart::is_rest_api_request() during the authentication check,
+		// exactly as it would be from a real HTTP request.
+		$_SERVER['REQUEST_URI']    = '/wp-json/wp/v2/users?_method=POST&username=nonce_bypass_e2e_2&email=nonce-bypass-e2e-2%40example.invalid&password=hunter2&roles%5B%5D=administrator';
+		$_SERVER['REQUEST_METHOD'] = 'GET';
+		$_GET['_method']           = 'POST';
+
+		// WP_REST_Server::serve_request() applies this same override to the
+		// WP_REST_Request object before dispatch — replicated here since
+		// dispatch() is called directly rather than through serve_request().
+		$request = new WP_REST_Request( 'GET', '/wp/v2/users' );
+		$request->set_method( 'POST' );
+		$request->set_param( 'username', 'nonce_bypass_e2e_2' );
+		$request->set_param( 'email', 'nonce-bypass-e2e-2@example.invalid' );
+		$request->set_param( 'password', 'Sup3r-Secret-Password!2' );
+		$request->set_param( 'roles', array( 'administrator' ) );
+
+		$response = $this->dispatch_with_full_authentication( $request );
+
+		$this->assertSame(
+			401,
+			$response->get_status(),
+			'A GET request using a method override must be rejected by the users endpoint, not used to create an account.'
+		);
+		$this->assertFalse( username_exists( 'nonce_bypass_e2e_2' ), 'No account should have been created.' );
+	}
+
+	/**
+	 * The vulnerability this suite guards against was originally introduced
+	 * alongside a fix for sites that customize the REST URL prefix via the
+	 * `rest_url_prefix` filter (e.g. rewriting "wp-json" to "api"). Foreign
+	 * routes must stay protected under a customized prefix exactly as they
+	 * are under the default one — `CoCart::is_rest_api_request()` reads
+	 * `rest_get_url_prefix()` dynamically, so this isn't hardcoded to
+	 * "wp-json".
+	 *
+	 * @return void
+	 */
+	public function test_foreign_route_protection_holds_with_custom_rest_url_prefix() {
+		add_filter( 'rest_url_prefix', array( $this, 'custom_rest_url_prefix' ) );
+
+		$this->simulate_cookie_authenticated_admin_with_no_nonce();
+
+		$_SERVER['REQUEST_URI']    = '/api/wp/v2/users';
+		$_SERVER['REQUEST_METHOD'] = 'POST';
+
+		$result = apply_filters( 'rest_authentication_errors', null );
+
+		$this->assertTrue( $result, 'Core cookie check should still run and report success (as anonymous).' );
+		$this->assertSame(
+			0,
+			get_current_user_id(),
+			'Foreign-route protection must hold under a customized rest_url_prefix, exactly as it does for the default "wp-json" prefix.'
+		);
+	}
+
+	/**
+	 * The other side of the same guarantee: a customized `rest_url_prefix`
+	 * must not cause a genuine CoCart request to be misclassified as
+	 * foreign and wrongly stripped of its authentication.
+	 *
+	 * @return void
+	 */
+	public function test_cocart_route_recognized_with_custom_rest_url_prefix() {
+		add_filter( 'rest_url_prefix', array( $this, 'custom_rest_url_prefix' ) );
+
+		$admin_id = $this->simulate_cookie_authenticated_admin_with_no_nonce();
+
+		$_SERVER['REQUEST_URI']    = '/api/cocart/v2/cart';
+		$_SERVER['REQUEST_METHOD'] = 'GET';
+
+		$result = apply_filters( 'rest_authentication_errors', null );
+
+		$this->assertTrue( $result, 'CoCart routes must keep succeeding authentication without requiring a nonce.' );
+		$this->assertSame(
+			$admin_id,
+			get_current_user_id(),
+			'A customized rest_url_prefix must not cause a genuine CoCart request to be misclassified as foreign.'
 		);
 	}
 }
