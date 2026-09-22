@@ -5,7 +5,7 @@
  * @author  Sébastien Dumont
  * @package CoCart\Classes
  * @since   2.6.0 Introduced.
- * @version 4.9.0
+ * @version 4.9.7
  */
 
 // Exit if accessed directly.
@@ -62,6 +62,23 @@ if ( ! class_exists( 'CoCart_Authentication' ) ) {
 		 * @var string
 		 */
 		protected $auth_method = '';
+
+		/**
+		 * Whether CoCart itself authenticated the current request (via Basic
+		 * Auth or a third party hooking `cocart_authenticate`, e.g. JWT).
+		 *
+		 * This is the trust boundary `check_authentication_error()` relies on.
+		 * It must never be based on what the request URL looks like — the URL
+		 * is attacker-controlled, so a route-pattern check can be satisfied by
+		 * appending an unrelated query value that merely contains the pattern.
+		 *
+		 * @access protected
+		 *
+		 * @since 4.9.7 Introduced.
+		 *
+		 * @var bool
+		 */
+		protected $authenticated_by_cocart = false;
 
 		/**
 		 * Basic authentication pattern.
@@ -299,6 +316,12 @@ if ( ! class_exists( 'CoCart_Authentication' ) ) {
 			 */
 			$user_id = apply_filters( 'cocart_authenticate', $user_id, is_ssl(), $this );
 
+			// Record that CoCart itself vouches for this request — the only
+			// signal check_authentication_error() is allowed to trust.
+			if ( ! empty( $user_id ) ) {
+				$this->authenticated_by_cocart = true;
+			}
+
 			return $user_id;
 		} // END authenticate()
 
@@ -343,6 +366,14 @@ if ( ! class_exists( 'CoCart_Authentication' ) ) {
 		 * @access public
 		 *
 		 * @since 3.0.0 Introduced.
+		 * @since 4.9.7 Scoped to requests CoCart itself has authenticated, tracked by
+		 *              `$authenticated_by_cocart` (set by `authenticate()` only when it
+		 *              establishes a user via Basic Auth or a third-party
+		 *              `cocart_authenticate` hook, e.g. JWT). The request URL must never
+		 *              be used to decide this — it is attacker-controlled, so a
+		 *              route-pattern check can be satisfied by appending a query value
+		 *              that merely contains the pattern, or by routing through the core
+		 *              batch endpoint.
 		 *
 		 * @param WP_Error|mixed $error Error from another authentication handler, null if we should handle it, or another value if not.
 		 *
@@ -354,9 +385,18 @@ if ( ! class_exists( 'CoCart_Authentication' ) ) {
 				return $error;
 			}
 
-			// If any other authentication error is logged then return it.
+			// If CoCart itself found invalid credentials for this request, surface that.
 			if ( is_wp_error( $this->get_error() ) ) {
 				return $this->get_error();
+			}
+
+			// Only answer "no error" for requests CoCart itself authenticated.
+			// Anything else — including a request whose URL merely resembles a
+			// CoCart route — must fall through untouched so WordPress core's own
+			// `rest_cookie_check_errors()` (a later priority on this same filter)
+			// still runs its nonce check instead of being short-circuited.
+			if ( ! $this->authenticated_by_cocart ) {
+				return $error;
 			}
 
 			return true;
