@@ -384,6 +384,60 @@ class Test_CoCart_Authentication_Nonce_Scope extends CoCart_REST_Test_Case {
 		);
 	}
 
+	/**
+	 * End-to-end batch variant — the same exploit delivered as a
+	 * `/wp-json/batch/v1` request batching a `/wp/v2/users` create call,
+	 * routed all the way through core's real batch dispatcher
+	 * (`WP_REST_Server::serve_batch_request_v1()`, which core registers
+	 * `/wp/v2/users` with `allow_batch => ['v1' => true]`). The outer batch
+	 * request is authenticated once; each batched sub-request is then
+	 * dispatched directly against whatever the current user already is —
+	 * so if the outer request were wrongly treated as CoCart-authenticated,
+	 * every sub-request would inherit that. Must be rejected and must not
+	 * create an account.
+	 *
+	 * @return void
+	 */
+	public function test_batch_endpoint_does_not_create_admin_without_nonce() {
+		$this->simulate_cookie_authenticated_admin_with_no_nonce();
+
+		$_SERVER['REQUEST_URI']    = '/wp-json/batch/v1';
+		$_SERVER['REQUEST_METHOD'] = 'POST';
+
+		$request = new WP_REST_Request( 'POST', '/batch/v1' );
+		$request->set_body_params(
+			array(
+				'validation' => 'normal',
+				'requests'   => array(
+					array(
+						'method' => 'POST',
+						'path'   => '/wp/v2/users',
+						'body'   => array(
+							'username' => 'nonce_bypass_batch',
+							'email'    => 'nonce-bypass-batch@example.invalid',
+							'password' => 'Sup3r-Secret-Password!4',
+							'roles'    => array( 'administrator' ),
+						),
+					),
+				),
+			)
+		);
+
+		$response = $this->dispatch_with_full_authentication( $request );
+		$data     = $response->get_data();
+
+		$this->assertFalse( username_exists( 'nonce_bypass_batch' ), 'No account should have been created via the batched sub-request.' );
+
+		if ( isset( $data['responses'][0]['status'] ) ) {
+			$this->assertSame( 401, $data['responses'][0]['status'], 'The batched sub-request must be rejected as unauthenticated, not used to create an account.' );
+		} else {
+			// The outer batch call itself was rejected outright (e.g. anonymous
+			// users may be disallowed from the batch endpoint entirely) —
+			// also an acceptable outcome, since either way no account is created.
+			$this->assertSame( 401, $response->get_status(), 'If the batch request is not routed to sub-requests, the outer call must itself be rejected as unauthenticated.' );
+		}
+	}
+
 	// -------------------------------------------------------------------------
 	// The corrected model: CoCart's own routes get no special treatment
 	// unless CoCart itself actually authenticated the request.
