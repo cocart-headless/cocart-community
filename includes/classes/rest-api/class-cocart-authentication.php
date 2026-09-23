@@ -704,11 +704,21 @@ if ( ! class_exists( 'CoCart_Authentication' ) ) {
 			$server->send_header( 'X-Robots-Tag', 'noindex' );
 			$server->send_header( 'X-Content-Type-Options', 'nosniff' );
 
+			// Credentialed access is only ever granted to the exact origin configured
+			// in settings — the "Allowed Origin" field documents "Allows cross-origin
+			// requests from the origin set below", singular. Reflecting any other
+			// origin here would let any website make a credentialed cross-origin
+			// request and read the response. When no origin is configured, requests
+			// are still allowed through (matching this plugin's historical default of
+			// an open REST API) but never with credentials.
+			$origin_is_explicitly_allowed = ! empty( $allowed_origin ) && $origin === $allowed_origin;
+			$should_reflect_origin        = $this->is_preflight() || empty( $allowed_origin ) || $origin_is_explicitly_allowed;
+
 			// Allow preflight requests and any allowed origins. Preflight requests
 			// are allowed because we'll be unable to validate customer header at that point.
-			if ( $this->is_preflight() || ! is_allowed_http_origin( $origin ) ) {
+			if ( $should_reflect_origin && ( $this->is_preflight() || ! is_allowed_http_origin( $origin ) ) ) {
 				$server->send_header( 'Access-Control-Allow-Origin', $origin );
-				$server->send_header( 'Access-Control-Allow-Credentials', ( ! empty( $origin ) && '*' !== $origin ) ? 'true' : 'false' );
+				$server->send_header( 'Access-Control-Allow-Credentials', $origin_is_explicitly_allowed ? 'true' : 'false' );
 			}
 
 			// Exit early during preflight requests. This is so someone cannot access API data by sending an OPTIONS request
