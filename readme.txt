@@ -289,7 +289,7 @@ We’d love to hear what you have to say. [Share your experience](https://testim
 
 CoCart is open source and community-driven. Every release is tested, maintained, and published here on WordPress.org. Need more power? [CoCart Plus](https://cocartapi.com?utm_medium=website&utm_source=wpplugindirectory&utm_campaign=readme&utm_content=readmelink) unlocks advanced features and priority support.
 
-= v4.9.7 - 22nd September, 2026 =
+= v4.9.7 - 30th September, 2026 =
 
 ### Security Patch
 
