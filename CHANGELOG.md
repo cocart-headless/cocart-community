@@ -1,6 +1,6 @@
 # Changelog for CoCart Community
 
-## v4.9.7 - 22nd September, 2026
+## v4.9.7 - 30th September, 2026
 
 ### Security Patch
 
