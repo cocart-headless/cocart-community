@@ -4,7 +4,7 @@ Tags: woocommerce, rest-api, decoupled, headless, cart
 Requires at least: 6.7
 Requires PHP: 7.4
 Tested up to: 7.1
-Stable tag: 4.9.6
+Stable tag: 4.9.7
 WC requires at least: 9.0
 WC tested up to: 11.1
 License: GPLv3
@@ -289,6 +289,14 @@ We’d love to hear what you have to say. [Share your experience](https://testim
 
 CoCart is open source and community-driven. Every release is tested, maintained, and published here on WordPress.org. Need more power? [CoCart Plus](https://cocartapi.com?utm_medium=website&utm_source=wpplugindirectory&utm_campaign=readme&utm_content=readmelink) unlocks advanced features and priority support.
 
+= v4.9.7 - 30th September, 2026 =
+
+### Security Patch
+
+This release hardens how CoCart's REST authentication check is scoped, ensuring WordPress's own request verification is not bypassed on other REST endpoints. It is recommended that you update to this release as soon as possible.
+
+* REST API: Authentication error check now only applies to requests CoCart authenticated itself, so WordPress's own nonce verification is no longer bypassed on other endpoints, including the batch endpoint. Reported by Naoki Kawahigashi.
+
 = v4.9.6 - 10th September, 2026 =
 
 ### Improvement
@@ -523,6 +531,6 @@ This release hardens how the cart session handler validates the cart key, howeve
 
 == Upgrade Notice ==
 
-= 4.9.6 =
+= 4.9.7 =
 
-Prevent enabling integrations without a loader module.
+Security hardening for CoCart's REST authentication check. Update as soon as possible.

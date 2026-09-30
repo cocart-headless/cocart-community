@@ -1,5 +1,13 @@
 # Changelog for CoCart Community
 
+## v4.9.7 - 30th September, 2026
+
+### Security Patch
+
+This release hardens how CoCart's REST authentication check is scoped, ensuring WordPress's own request verification is not bypassed on other REST endpoints. It is recommended that you update to this release as soon as possible.
+
+* REST API: Authentication error check now only applies to CoCart's own REST requests. Reported by Naoki Kawahigashi.
+
 ## v4.9.6 - 10th September, 2026
 
 ### Improvement
