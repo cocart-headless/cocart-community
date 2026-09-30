@@ -295,7 +295,7 @@ CoCart is open source and community-driven. Every release is tested, maintained,
 
 This release hardens how CoCart's REST authentication check is scoped, ensuring WordPress's own request verification is not bypassed on other REST endpoints. It is recommended that you update to this release as soon as possible.
 
-* REST API: Authentication error check now only applies to CoCart's own REST requests. Reported by Naoki Kawahigashi.
+* REST API: Authentication error check now only applies to requests CoCart authenticated itself, so WordPress's own nonce verification is no longer bypassed on other endpoints, including the batch endpoint. Reported by Naoki Kawahigashi.
 
 = v4.9.6 - 10th September, 2026 =
 
